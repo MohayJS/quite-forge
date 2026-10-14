@@ -99,37 +99,53 @@ def send_prompt(user_prompt):
     print("Response generated and saved to response.txt.", flush=True)
 
 start_model()
+PROMPT.write_text("", encoding="utf-8")
 last_activity = time.monotonic()
+busy = threading.Event()
+commands = queue.Queue()
+
+def read_commands():
+    while True:
+        try: commands.put(input("\n[Type /exit, /clear, /save name, or /load name] ").strip())
+        except EOFError: commands.put("/exit"); return
+
+def generate(user_prompt):
+    busy.set()
+    try: send_prompt(user_prompt)
+    finally: busy.clear()
+
+threading.Thread(target=read_commands, daemon=True).start()
 print("Persistent local session started. Model is loading...", flush=True)
-print("Edit prompt.txt, then press Enter in this terminal.", flush=True)
+print("Write a prompt into prompt.txt and save it; the session will detect it automatically.", flush=True)
 try:
     while True:
         if time.monotonic() - last_activity >= args.timeout:
-            print("Idle timeout reached; terminating local model.")
-            break
-        command = input("\n[Press Enter after editing prompt.txt | /exit | /clear | /save name | /load name] ").strip()
-        last_activity = time.monotonic()
-        if command == "/exit": break
-        if command == "/clear":
-            history.clear(); save_history(); start_model()
-            print("History cleared and model context restarted."); continue
-        if command.startswith("/save "):
-            name = command[6:].strip()
-            if not name: print("Usage: /save <name>"); continue
-            SAVED.mkdir(exist_ok=True); (SAVED / f"{name}.json").write_text(json.dumps(history, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-            print(f"Conversation saved as {name}."); continue
-        if command.startswith("/load "):
-            name = command[6:].strip(); path = SAVED / f"{name}.json"
-            if not name or not path.exists(): print("Usage: /load <name> (saved conversation not found)"); continue
-            history = load_history(path); save_history(); start_model()
-            print(f"Conversation {name} loaded and model context restarted."); continue
-        if command:
-            print("Prompts must be written in prompt.txt. Press only Enter here, or use a slash command."); continue
-        user_prompt = PROMPT.read_text(encoding="utf-8").strip()
-        if not user_prompt:
-            print("prompt.txt is empty; write a prompt there first."); continue
-        send_prompt(user_prompt)
-        PROMPT.write_text("", encoding="utf-8")
+            print("Idle timeout reached; terminating local model."); break
+        try:
+            command = commands.get_nowait()
+            last_activity = time.monotonic()
+            if command == "/exit": break
+            if command == "/clear":
+                if busy.is_set(): print("Wait for the current response before using /clear."); continue
+                history.clear(); save_history(); start_model(); print("History cleared and model context restarted."); continue
+            if command.startswith("/save "):
+                name = command[6:].strip()
+                if not name: print("Usage: /save <name>"); continue
+                SAVED.mkdir(exist_ok=True); (SAVED / f"{name}.json").write_text(json.dumps(history, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+                print(f"Conversation saved as {name}."); continue
+            if command.startswith("/load "):
+                if busy.is_set(): print("Wait for the current response before using /load."); continue
+                name = command[6:].strip(); path = SAVED / f"{name}.json"
+                if not name or not path.exists(): print("Usage: /load <name> (saved conversation not found)"); continue
+                history = load_history(path); save_history(); start_model(); print(f"Conversation {name} loaded and model context restarted."); continue
+        except queue.Empty: pass
+        if not busy.is_set():
+            user_prompt = PROMPT.read_text(encoding="utf-8").strip()
+            if user_prompt:
+                PROMPT.write_text("", encoding="utf-8")
+                last_activity = time.monotonic()
+                threading.Thread(target=generate, args=(user_prompt,), daemon=True).start()
+        time.sleep(0.2)
 finally:
     stop_model()
     print("Local session terminated.")
