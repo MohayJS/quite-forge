@@ -7,21 +7,30 @@ import sys
 
 BASE = Path(__file__).resolve().parent
 MODEL = BASE / "models" / "Phi-4-mini-instruct-q4_k_m.gguf"
-PROMPT = BASE / "prompt.txt"
-OUTPUT = BASE / "response.txt"
-DEFAULT_HISTORY = BASE / "conversation.json"
+PROMPT = BASE / "p.txt"
+OUTPUT = BASE / "r.txt"
 WORK_PROMPT = BASE / ".prompt_for_model.txt"
 
 parser = argparse.ArgumentParser(description="Run Phi-4-mini locally with conversation history.")
 parser.add_argument("--reset", action="store_true", help="clear history before running")
 parser.add_argument("--history", type=Path, default=DEFAULT_HISTORY, help="use another history JSON file")
+parser.add_argument("locations", nargs="*", metavar="HISTORY_DIR RESPONSE_DIR PROMPT_DIR")
 args = parser.parse_args()
-history_file = args.history if args.history.is_absolute() else BASE / args.history
+if len(args.locations) not in (0, 3):
+    raise SystemExit("Provide either no locations or exactly: HISTORY_DIR RESPONSE_DIR PROMPT_DIR")
+locations = args.locations or ["-", "-", "-"]
+def locate(value, filename):
+    folder = BASE if value == "-" else Path(value)
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder / filename
+history_file = locate(locations[0], "c.json") if args.history == DEFAULT_HISTORY else (args.history if args.history.is_absolute() else BASE / args.history)
+output_file = locate(locations[1], "r.txt")
+prompt_file = locate(locations[2], "p.txt")
 
 if not MODEL.exists():
     raise SystemExit(f"Model not found: {MODEL}")
-if not PROMPT.exists():
-    raise SystemExit(f"Prompt file not found: {PROMPT}")
+if not prompt_file.exists():
+    prompt_file.write_text("", encoding="utf-8")
 
 if args.reset or not history_file.exists():
     history = []
@@ -31,9 +40,9 @@ else:
     except json.JSONDecodeError:
         raise SystemExit(f"Invalid history file: {history_file}")
 
-user_prompt = PROMPT.read_text(encoding="utf-8").strip()
+user_prompt = prompt_file.read_text(encoding="utf-8").strip()
 if not user_prompt:
-    raise SystemExit("prompt.txt is empty.")
+    raise SystemExit("p.txt is empty.")
 
 history_text = "\n".join(f"{m['role'].upper()}: {m['content']}" for m in history)
 transcript = (history_text + "\n" if history_text else "") + f"USER: {user_prompt}\nASSISTANT:"
@@ -67,6 +76,6 @@ history.extend([
 ])
 history_file.parent.mkdir(parents=True, exist_ok=True)
 history_file.write_text(json.dumps(history, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-OUTPUT.write_text(answer + "\n", encoding="utf-8")
+output_file.write_text(answer + "\n", encoding="utf-8")
 print(f"Response written to: {OUTPUT}")
 print(f"Conversation history saved to: {history_file}")

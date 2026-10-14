@@ -4,15 +4,25 @@ import argparse, json, queue, subprocess, sys, threading, time
 
 BASE = Path(__file__).resolve().parent
 MODEL = BASE / "models" / "Phi-4-mini-instruct-q4_k_m.gguf"
-PROMPT = BASE / "prompt.txt"
-OUTPUT = BASE / "response.txt"
-HISTORY = BASE / "conversation.json"
-SAVED = BASE / "conversations"
-CONTEXT = BASE / ".conversation_context.txt"
-
+PROMPT = BASE / "p.txt"
+OUTPUT = BASE / "r.txt"
+HISTORY = BASE / "c.json"
 parser = argparse.ArgumentParser()
 parser.add_argument("--timeout", type=int, default=3600)
+parser.add_argument("locations", nargs="*", metavar="HISTORY_DIR RESPONSE_DIR PROMPT_DIR")
 args = parser.parse_args()
+if len(args.locations) not in (0, 3):
+    raise SystemExit("Provide either no locations or exactly: HISTORY_DIR RESPONSE_DIR PROMPT_DIR")
+locations = args.locations or ["-", "-", "-"]
+def locate(value, filename):
+    folder = BASE if value == "-" else Path(value)
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder / filename
+HISTORY = locate(locations[0], "c.json")
+OUTPUT = locate(locations[1], "r.txt")
+PROMPT = locate(locations[2], "p.txt")
+SAVED = HISTORY.parent / "conversations"
+CONTEXT = HISTORY.parent / ".conversation_context.txt"
 if not MODEL.exists(): raise SystemExit(f"Model not found: {MODEL}")
 PROMPT.write_text("", encoding="utf-8")
 
@@ -96,7 +106,7 @@ def send_prompt(user_prompt):
     history.extend([{"role":"user", "content":user_prompt, "time":now},
                     {"role":"assistant", "content":answer, "time":datetime.now(timezone.utc).isoformat()}])
     save_history()
-    print("Response generated and saved to response.txt.", flush=True)
+    print("Response generated and saved to r.txt.", flush=True)
 
 start_model()
 PROMPT.write_text("", encoding="utf-8")
@@ -116,7 +126,7 @@ def generate(user_prompt):
 
 threading.Thread(target=read_commands, daemon=True).start()
 print("Persistent local session started. Model is loading...", flush=True)
-print("Write a prompt into prompt.txt and save it; the session will detect it automatically.", flush=True)
+print("Write a prompt into p.txt and save it; the session will detect it automatically.", flush=True)
 try:
     while True:
         if time.monotonic() - last_activity >= args.timeout:

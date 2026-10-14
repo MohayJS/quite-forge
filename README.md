@@ -1,9 +1,9 @@
 # Local Phi-4-mini runner
 
-1. Edit `prompt.txt`.
+1. Edit `p.txt`.
 2. Run `./run_model.ps1` or `python run_model.py`.
-3. Read the answer in `response.txt`.
-4. The conversation is saved in `conversation.json` and included next time.
+3. Read the answer in `r.txt`.
+4. The conversation is saved in `c.json` and included next time.
 
 Reset the conversation:
 
@@ -31,8 +31,8 @@ This session uses only local stdin/stdout; it does not listen on a network port.
 
 Session workflow:
 
-- The session clears `prompt.txt` on startup.
-- Write a prompt into `prompt.txt`, then press Enter in the session terminal.
+- The session clears `p.txt` on startup.
+- Write a prompt into `p.txt` and save it; the session detects it automatically.
 - `/clear` clears history and restarts the model context.
 - `/save name` saves a conversation under `conversations\name.json`.
 - `/load name` restores it and restarts the model context.
