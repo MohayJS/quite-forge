@@ -2,3 +2,4 @@ response.txt
 .prompt_for_model.txt
 conversation.json
 __pycache__/local_session.cpython-314.pyc
+conversation.json

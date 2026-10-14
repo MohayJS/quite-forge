@@ -8,6 +8,7 @@ PROMPT = BASE / "prompt.txt"
 OUTPUT = BASE / "response.txt"
 HISTORY = BASE / "conversation.json"
 SAVED = BASE / "conversations"
+CONTEXT = BASE / ".conversation_context.txt"
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--timeout", type=int, default=3600)
@@ -28,10 +29,18 @@ def start_model():
     global process, output_queue
     if process and process.poll() is None: process.terminate()
     output_queue = queue.Queue()
-    process = subprocess.Popen([
-        "llama-cli", "-m", str(MODEL), "-n", "512", "-c", "4096",
-        "--simple-io", "--no-show-timings", "--log-disable", "-r", ">"
-    ], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    command = ["llama-cli", "-m", str(MODEL), "-n", "512", "-c", "4096",
+               "--simple-io", "--no-show-timings", "--log-disable", "-r", ">"]
+    if history:
+        transcript = "\n".join(f"{m['role'].capitalize()}: {m['content']}" for m in history)
+        CONTEXT.write_text(
+            "Use the following saved conversation as prior context. Answer the next user message normally.\n\n" + transcript,
+            encoding="utf-8")
+        command += ["--system-prompt-file", str(CONTEXT)]
+    else:
+        CONTEXT.write_text("", encoding="utf-8")
+    process = subprocess.Popen(command,
+       stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
        text=True, encoding="utf-8", bufsize=1)
     def reader():
         while True:
@@ -45,18 +54,6 @@ def start_model():
     if process.poll() is not None:
         error = process.stderr.read().strip()
         raise SystemExit(f"llama-cli exited during startup: {error or 'unknown error'}")
-    # Rebuild the model's live context from the saved conversation. The
-    # model must reread this after every process restart; JSON alone is not
-    # automatically visible to llama-cli.
-    if history:
-        transcript = "\n".join(f"{m['role'].upper()}: {m['content']}" for m in history)
-        process.stdin.write(
-            "The following is the existing conversation. Use it as context, "
-            "do not answer it, and wait for the next user message.\n\n" +
-            transcript + "\n\n"
-        )
-        process.stdin.flush()
-        read_response()
 
 def stop_model():
     if process and process.poll() is None:
@@ -86,8 +83,6 @@ def save_history():
 def send_prompt(user_prompt):
     if process.poll() is not None:
         raise SystemExit("The local model process has already stopped. Restart run_session.cmd.")
-    # llama-cli already owns the active chat context and KV cache. Sending
-    # the transcript again would duplicate/confuse its chat template.
     process.stdin.write(user_prompt + "\n")
     process.stdin.flush()
     print("Generating response...", flush=True)
