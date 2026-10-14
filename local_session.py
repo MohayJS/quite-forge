@@ -42,6 +42,21 @@ def start_model():
     threading.Thread(target=reader, daemon=True).start()
     # Discard llama-cli's startup banner and its initial input prompt.
     read_response()
+    if process.poll() is not None:
+        error = process.stderr.read().strip()
+        raise SystemExit(f"llama-cli exited during startup: {error or 'unknown error'}")
+    # Rebuild the model's live context from the saved conversation. The
+    # model must reread this after every process restart; JSON alone is not
+    # automatically visible to llama-cli.
+    if history:
+        transcript = "\n".join(f"{m['role'].upper()}: {m['content']}" for m in history)
+        process.stdin.write(
+            "The following is the existing conversation. Use it as context, "
+            "do not answer it, and wait for the next user message.\n\n" +
+            transcript + "\n\n"
+        )
+        process.stdin.flush()
+        read_response()
 
 def stop_model():
     if process and process.poll() is None:
@@ -69,6 +84,8 @@ def save_history():
     HISTORY.write_text(json.dumps(history, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 def send_prompt(user_prompt):
+    if process.poll() is not None:
+        raise SystemExit("The local model process has already stopped. Restart run_session.cmd.")
     # llama-cli already owns the active chat context and KV cache. Sending
     # the transcript again would duplicate/confuse its chat template.
     process.stdin.write(user_prompt + "\n")
