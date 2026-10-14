@@ -9,18 +9,18 @@ OUTPUT = BASE / "r.txt"
 HISTORY = BASE / "c.json"
 parser = argparse.ArgumentParser()
 parser.add_argument("--timeout", type=int, default=3600)
-parser.add_argument("locations", nargs="*", metavar="HISTORY_DIR RESPONSE_DIR PROMPT_DIR")
+parser.add_argument("locations", nargs="*", metavar="PROMPT_DIR RESPONSE_DIR HISTORY_DIR")
 args = parser.parse_args()
-if len(args.locations) not in (0, 3):
-    raise SystemExit("Provide either no locations or exactly: HISTORY_DIR RESPONSE_DIR PROMPT_DIR")
-locations = args.locations or ["-", "-", "-"]
+if len(args.locations) > 3:
+    raise SystemExit("Provide at most: PROMPT_DIR RESPONSE_DIR HISTORY_DIR")
+locations = (args.locations + ["-", "-", "-"])[:3]
 def locate(value, filename):
     folder = BASE if value == "-" else Path(value)
     folder.mkdir(parents=True, exist_ok=True)
     return folder / filename
-HISTORY = locate(locations[0], "c.json")
+PROMPT = locate(locations[0], "p.txt")
 OUTPUT = locate(locations[1], "r.txt")
-PROMPT = locate(locations[2], "p.txt")
+HISTORY = locate(locations[2], "c.json")
 SAVED = HISTORY.parent / "conversations"
 CONTEXT = HISTORY.parent / ".conversation_context.txt"
 if not MODEL.exists(): raise SystemExit(f"Model not found: {MODEL}")

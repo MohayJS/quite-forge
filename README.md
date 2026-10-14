@@ -1,38 +1,77 @@
-# Local Phi-4-mini runner
+# QuietForge
 
-1. Edit `p.txt`.
-2. Run `./run_model.ps1` or `python run_model.py`.
-3. Read the answer in `r.txt`.
-4. The conversation is saved in `c.json` and included next time.
+QuietForge is a private, offline-first AI assistant for Windows. It runs Phi-4-mini locally through `llama.cpp`, reads prompts from a text file, and writes responses to another text file. It does not start a web server or expose an API port.
 
-Reset the conversation:
+## Requirements
 
-```powershell
-.\run_model.ps1 -Reset
-```
+- Windows 10 or newer
+- Python 3.10+
+- `llama.cpp` with the `llama-cli` command available on `PATH`
+- Approximately 3–5 GB of available RAM
 
-Use a separate conversation:
+Install `llama.cpp` with WinGet:
 
 ```powershell
-python .\run_model.py --history conversations\project.json
+winget install --id ggml.llamacpp --accept-source-agreements --accept-package-agreements
 ```
 
-This uses `llama-cli` directly. It does not start a server and works offline after the model has been downloaded.
+## Download the model
 
-For a persistent local process that keeps the model loaded:
+This project uses `Phi-4-mini-instruct-q4_k_m.gguf`. Download it into a `models` folder:
 
 ```powershell
-run_session.cmd
-run_session.cmd --reset
-run_session.cmd --timeout 3600
+New-Item -ItemType Directory -Force .\models | Out-Null
+curl.exe -L --fail -o .\models\Phi-4-mini-instruct-q4_k_m.gguf `
+  https://huggingface.co/Mungert/Phi-4-mini-instruct-GGUF/resolve/main/Phi-4-mini-instruct-q4_k_m.gguf
 ```
 
-This session uses only local stdin/stdout; it does not listen on a network port. Press `Ctrl+C` or type `/exit` to terminate it.
+The model is not included because it is several gigabytes in size.
 
-Session workflow:
+## Run
 
-- The session clears `p.txt` on startup.
-- Write a prompt into `p.txt` and save it; the session detects it automatically.
-- `/clear` clears history and restarts the model context.
-- `/save name` saves a conversation under `conversations\name.json`.
-- `/load name` restores it and restarts the model context.
+After cloning and downloading the model:
+
+```powershell
+.\run_session.cmd
+```
+
+Write your prompt into `p.txt` and save the file. QuietForge detects it automatically, clears it when accepted, and writes the answer to `r.txt`. A prompt saved while a response is generating remains queued in `p.txt` until the current response finishes.
+
+Conversation history is stored locally in `c.json`. Terminal commands:
+
+```text
+/clear
+/save name
+/load name
+/exit
+```
+
+The default idle timeout is 3,600 seconds:
+
+```powershell
+.\run_session.cmd --timeout 1800
+```
+
+## Custom file locations
+
+Arguments use this order: `PROMPT_DIR RESPONSE_DIR HISTORY_DIR`. Missing directories and files are created automatically. Use `-` for the project directory; omitted trailing locations also default to `-`.
+
+```powershell
+.\run_session.cmd C:\Users\mohay C:\ C:\Users\mohay\OneDrive\Desktop
+```
+
+The same arguments work with one-shot mode:
+
+```powershell
+py .\run_model.py C:\Users\mohay C:\ C:\Users\mohay\OneDrive\Desktop
+```
+
+Use `--reset` with `run_model.py` to ignore saved history for one run.
+
+## Privacy
+
+After the model is downloaded, inference is local and offline. QuietForge uses standard input/output with a local child process and does not listen on a network port. Prompts, responses, and conversations are intentionally ignored by Git.
+
+## License
+
+The project code is released under the MIT License. The model has its own license and terms; review its model card before redistribution.

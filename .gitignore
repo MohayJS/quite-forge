@@ -1,8 +1,24 @@
-response.txt
-.prompt_for_model.txt
-conversation.json
-__pycache__/local_session.cpython-314.pyc
-conversation.json
-c.json
+# Downloaded model weights
+models/
+
+# Local prompts, outputs, conversations, and generated context
 p.txt
 r.txt
+c.json
+prompt.txt
+response.txt
+conversation.json
+conversation.backup.json
+.prompt_for_model.txt
+.conversation_context.txt
+conversations/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Local environment/editor files
+.venv/
+venv/
+.env
+.vscode/
