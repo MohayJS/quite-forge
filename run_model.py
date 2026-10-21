@@ -32,7 +32,11 @@ if not MODEL.exists():
 if not prompt_file.exists():
     prompt_file.write_text("", encoding="utf-8")
 
-if args.reset or not history_file.exists():
+if args.reset:
+    history = []
+    history_file.parent.mkdir(parents=True, exist_ok=True)
+    history_file.write_text("[]\n", encoding="utf-8")
+elif not history_file.exists():
     history = []
 else:
     try:
@@ -61,22 +65,37 @@ command = [
     "llama-cli", "-m", str(MODEL), "-f", str(WORK_PROMPT),
     "-n", "512", "-c", "4096", "--no-display-prompt",
     "--single-turn", "--simple-io", "--no-show-timings", "--log-disable",
+    "--device", "none", "--gpu-layers", "0",
 ]
 
 try:
-    result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8")
+    result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace")
 except FileNotFoundError:
     raise SystemExit("llama-cli was not found. Reopen PowerShell, then run this script again.")
 if result.returncode != 0:
     print(result.stderr, file=sys.stderr)
     raise SystemExit(result.returncode)
 
+# llama.cpp may echo the final ASSISTANT marker for shorter prompts, or
+# truncate long echoed prompts with its truncation marker. Support both forms.
 text = result.stdout
-if "ASSISTANT:" in text:
-    text = text.rsplit("ASSISTANT:", 1)[1]
+assistant_marker = "ASSISTANT:"
+boundary = text.rfind(assistant_marker)
+if boundary >= 0:
+    text = text[boundary + len(assistant_marker):]
+else:
+    boundary_marker = " ... (truncated)\n"
+    boundary = text.rfind(boundary_marker)
+    if boundary < 0:
+        raise SystemExit("Could not locate llama-cli's echoed prompt; history was not updated.")
+    text = text[boundary + len(boundary_marker):]
+if not text.strip():
+    raise SystemExit("Could not locate llama-cli's echoed prompt; history was not updated.")
 if "Exiting..." in text:
     text = text.split("Exiting...", 1)[0]
 answer = text.strip()
+if not answer:
+    raise SystemExit("llama-cli did not return a clean assistant response; history was not updated.")
 
 now = datetime.now(timezone.utc).isoformat()
 history.extend([

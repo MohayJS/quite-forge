@@ -1,6 +1,6 @@
 # QuietForge
 
-QuietForge is a private, offline-first AI assistant for Windows. It runs Phi-4-mini locally through `llama.cpp`, reads prompts from a text file, and writes responses to another text file. It does not start a web server or expose an API port.
+QuietForge is a private, offline-first AI assistant for Windows. It runs Phi-4-mini locally through `llama.cpp` on the CPU, reads prompts from a text file, and writes responses to another text file. It does not start a web server or expose an API port.
 
 ## Requirements
 
@@ -69,7 +69,7 @@ The same arguments work with one-shot mode:
 py .\run_model.py C:\Users\mohay C:\ C:\Users\mohay\OneDrive\Desktop
 ```
 
-Use `--reset` with `run_model.py` to ignore saved history for one run. Use `--undo` to remove the latest exchange from the history file and exit.
+Use `--reset` with `run_model.py` to clear saved history before generating a response. The new prompt and response are then saved as the start of a fresh conversation. Use `--undo` to remove the latest exchange from the history file and exit.
 
 ## Privacy
 

@@ -40,7 +40,8 @@ def start_model():
     if process and process.poll() is None: process.terminate()
     output_queue = queue.Queue()
     command = ["llama-cli", "-m", str(MODEL), "-n", "512", "-c", "4096",
-               "--simple-io", "--no-show-timings", "--log-disable", "-r", ">"]
+               "--simple-io", "--no-show-timings", "--log-disable",
+               "--device", "none", "--gpu-layers", "0", "-r", ">"]
     if history:
         transcript = "\n".join(f"{m['role'].capitalize()}: {m['content']}" for m in history)
         CONTEXT.write_text(
