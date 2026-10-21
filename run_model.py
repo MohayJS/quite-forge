@@ -4,6 +4,7 @@ import argparse
 import json
 import subprocess
 import sys
+from shell_tools import MAX_TOOL_CALLS, TOOL_INSTRUCTIONS, challenge_session_active, clean_truncation_marker, find_tool_request, load_system_prompt, run_shell, tool_result
 
 BASE = Path(__file__).resolve().parent
 MODEL = BASE / "models" / "Phi-4-mini-instruct-q4_k_m.gguf"
@@ -58,44 +59,67 @@ if not user_prompt:
     raise SystemExit("p.txt is empty.")
 
 history_text = "\n".join(f"{m['role'].upper()}: {m['content']}" for m in history)
-transcript = (history_text + "\n" if history_text else "") + f"USER: {user_prompt}\nASSISTANT:"
-WORK_PROMPT.write_text(transcript, encoding="utf-8")
+system_prompt = load_system_prompt()
+turns = (history_text + "\n" if history_text else "") + f"SYSTEM: {system_prompt}\n\n{TOOL_INSTRUCTIONS}\nUSER: {user_prompt}\nASSISTANT:"
+tool_trace = []
 
-command = [
-    "llama-cli", "-m", str(MODEL), "-f", str(WORK_PROMPT),
-    "-n", "512", "-c", "4096", "--no-display-prompt",
-    "--single-turn", "--simple-io", "--no-show-timings", "--log-disable",
-    "--device", "none", "--gpu-layers", "0",
-]
+for tool_count in range(MAX_TOOL_CALLS + 1):
+    WORK_PROMPT.write_text(turns, encoding="utf-8")
+    command = [
+        "llama-cli", "-m", str(MODEL), "-f", str(WORK_PROMPT),
+        "-n", "80", "-c", "4096", "--no-display-prompt",
+        "--single-turn", "--simple-io", "--no-show-timings", "--log-disable",
+        "--device", "none", "--gpu-layers", "0",
+    ]
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    except FileNotFoundError:
+        raise SystemExit("llama-cli was not found. Reopen PowerShell, then run this script again.")
+    if result.returncode != 0:
+        print(result.stderr, file=sys.stderr)
+        raise SystemExit(result.returncode)
 
-try:
-    result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace")
-except FileNotFoundError:
-    raise SystemExit("llama-cli was not found. Reopen PowerShell, then run this script again.")
-if result.returncode != 0:
-    print(result.stderr, file=sys.stderr)
-    raise SystemExit(result.returncode)
-
-# llama.cpp may echo the final ASSISTANT marker for shorter prompts, or
-# truncate long echoed prompts with its truncation marker. Support both forms.
-text = result.stdout
-assistant_marker = "ASSISTANT:"
-boundary = text.rfind(assistant_marker)
-if boundary >= 0:
-    text = text[boundary + len(assistant_marker):]
+    # llama.cpp echoes either the ASSISTANT marker or a truncated prompt tail.
+    text = result.stdout
+    assistant_marker = "ASSISTANT:"
+    boundary = text.rfind(assistant_marker)
+    if boundary >= 0:
+        text = text[boundary + len(assistant_marker):]
+    else:
+        boundary_marker = " ... (truncated)\n"
+        boundary = text.rfind(boundary_marker)
+        if boundary < 0:
+            raise SystemExit("Could not locate llama-cli's echoed prompt; history was not updated.")
+        text = text[boundary + len(boundary_marker):]
+    if "Exiting..." in text:
+        text = text.split("Exiting...", 1)[0]
+    answer = text.strip()
+    request = find_tool_request(answer)
+    if not request:
+        if challenge_session_active():
+            turns += f"{answer}\nUSER: Your challenge connection is still active. Do not give a final answer yet. Read the latest server hint and submit the next Linux command using exactly [[run]]command[[/run]]. If the server has confirmed completion, report its exact confirmation.\nASSISTANT:"
+            continue
+        break
+    if tool_count == MAX_TOOL_CALLS:
+        answer = "I reached the limit of five terminal commands for this response. " + answer
+        break
+    shell, shell_command = request
+    if not shell_command:
+        tool_output = "The terminal command was empty."
+        exit_code = 2
+    else:
+        exit_code, tool_output = run_shell(shell, shell_command)
+    result_text = tool_result(shell, shell_command, exit_code, tool_output)
+    tool_trace.append(result_text)
+    turns += f"{answer}\nUSER: {result_text}\nUSER: Use the completed command result above to continue. If another command is needed, request it using the required tool format; otherwise answer normally.\nASSISTANT:"
 else:
-    boundary_marker = " ... (truncated)\n"
-    boundary = text.rfind(boundary_marker)
-    if boundary < 0:
-        raise SystemExit("Could not locate llama-cli's echoed prompt; history was not updated.")
-    text = text[boundary + len(boundary_marker):]
-if not text.strip():
-    raise SystemExit("Could not locate llama-cli's echoed prompt; history was not updated.")
-if "Exiting..." in text:
-    text = text.split("Exiting...", 1)[0]
-answer = text.strip()
+    answer = "The terminal command limit was reached."
+
 if not answer:
     raise SystemExit("llama-cli did not return a clean assistant response; history was not updated.")
+if tool_trace:
+    answer = "\n\n".join(tool_trace + [answer])
+answer = clean_truncation_marker(answer).strip()
 
 now = datetime.now(timezone.utc).isoformat()
 history.extend([

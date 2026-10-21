@@ -37,6 +37,8 @@ After cloning and downloading the model:
 
 Write your prompt into `p.txt` and save the file. QuietForge detects it automatically, clears it when accepted, and writes the answer to `r.txt`. A prompt saved while a response is generating remains queued in `p.txt` until the current response finishes.
 
+The CTF system prompt is stored in `system_prompt.txt` and is included in both one-shot and persistent runs. Edit that file to change the model's challenge-solving guidance; the default asks it to verify terminal results and avoid reporting guessed flags as solved.
+
 Conversation history is stored locally in `c.json`. Terminal commands:
 
 ```text
@@ -48,6 +50,8 @@ Conversation history is stored locally in `c.json`. Terminal commands:
 ```
 
 Use `/undo` to remove the latest complete user/assistant exchange from saved history and restart the model with the remaining conversation. This is useful when an unwanted response was saved. In one-shot mode, run `py .\run_model.py --undo` to remove the latest exchange without generating a response. The next normal run uses the remaining history.
+
+The model can request terminal commands using `[[run]]...[[/run]]`. Git Bash runs by default; it can explicitly request `[[run:wsl]]...[[/run]]` to use Ubuntu in WSL, `[[run:cmd]]...[[/run]]`, or `[[run:powershell]]...[[/run]]`. Commands run from the QuietForge project directory (translated to its WSL path for Ubuntu). QuietForge waits for each command to finish, then sends the exit code and output back to the model. Each command has a 120-second timeout, output is limited to 12,000 characters, and each response can run at most five commands.
 
 The default idle timeout is 3,600 seconds:
 

@@ -1,6 +1,7 @@
 from pathlib import Path
 from datetime import datetime, timezone
 import argparse, json, queue, subprocess, sys, threading, time
+from shell_tools import MAX_TOOL_CALLS, TOOL_INSTRUCTIONS, clean_truncation_marker, find_tool_request, load_system_prompt, run_shell, tool_result
 
 BASE = Path(__file__).resolve().parent
 MODEL = BASE / "models" / "Phi-4-mini-instruct-q4_k_m.gguf"
@@ -42,14 +43,12 @@ def start_model():
     command = ["llama-cli", "-m", str(MODEL), "-n", "512", "-c", "4096",
                "--simple-io", "--no-show-timings", "--log-disable",
                "--device", "none", "--gpu-layers", "0", "-r", ">"]
-    if history:
-        transcript = "\n".join(f"{m['role'].capitalize()}: {m['content']}" for m in history)
-        CONTEXT.write_text(
-            "Use the following saved conversation as prior context. Answer the next user message normally.\n\n" + transcript,
-            encoding="utf-8")
-        command += ["--system-prompt-file", str(CONTEXT)]
-    else:
-        CONTEXT.write_text("", encoding="utf-8")
+    transcript = "\n".join(f"{m['role'].capitalize()}: {m['content']}" for m in history)
+    context_text = load_system_prompt() + "\n\n" + TOOL_INSTRUCTIONS
+    if transcript:
+        context_text += "\n\nUse the following saved conversation as prior context. Answer the next user message normally.\n\n" + transcript
+    CONTEXT.write_text(context_text, encoding="utf-8")
+    command += ["--system-prompt-file", str(CONTEXT)]
     process = subprocess.Popen(command,
        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
        text=True, encoding="utf-8", bufsize=1)
@@ -102,6 +101,30 @@ def send_prompt(user_prompt):
     # while it finishes switching from startup to conversation mode.
     while "/exit or Ctrl+C" in answer or "/clear              clear the chat history" in answer:
         answer = read_response()
+    tool_trace = []
+    for tool_count in range(MAX_TOOL_CALLS + 1):
+        request = find_tool_request(answer)
+        if not request:
+            break
+        if tool_count == MAX_TOOL_CALLS:
+            answer = "I reached the limit of five terminal commands for this response."
+            break
+        shell, shell_command = request
+        if not shell_command:
+            exit_code, output = 2, "The terminal command was empty."
+        else:
+            print(f"Running {shell} command and waiting for completion...", flush=True)
+            exit_code, output = run_shell(shell, shell_command)
+        result_text = tool_result(shell, shell_command, exit_code, output)
+        tool_trace.append(result_text)
+        process.stdin.write(result_text + "\nContinue using the result above. Request another command with the tool format if needed; otherwise give the final answer.\n")
+        process.stdin.flush()
+        answer = read_response()
+        while "/exit or Ctrl+C" in answer or "/clear              clear the chat history" in answer:
+            answer = read_response()
+    if tool_trace:
+        answer = "\n\n".join(tool_trace + [answer])
+    answer = clean_truncation_marker(answer).strip()
     OUTPUT.write_text(answer + "\n", encoding="utf-8")
     now = datetime.now(timezone.utc).isoformat()
     history.extend([{"role":"user", "content":user_prompt, "time":now},
