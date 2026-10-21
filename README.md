@@ -55,7 +55,7 @@ py .\run_model.py --threads 6
 
 CPU load varies with prompt length, memory bandwidth, and thermal limits, so the thread setting targets utilization but does not guarantee an exact percentage.
 
-Write your prompt into `p.txt` and save the file. QuietForge detects it automatically, clears it when accepted, and writes the answer to `r.txt`. A prompt saved while a response is generating remains queued in `p.txt` until the current response finishes.
+Put challenge files in `workspace/`. Model terminal commands start in this folder in WSL, Git Bash, CMD, and PowerShell, so use `ls` or `cat app.py` there; do not prefix paths with `workspace/`. The runner adds a live list of workspace files to each prompt. Relative paths (such as `./flag.txt`) resolve against the challenge workspace. The folder is local and ignored by Git. Then write your prompt into `p.txt` and save it. QuietForge detects it automatically, clears it when accepted, and writes the answer to `r.txt`. A prompt saved while a response is generating remains queued in `p.txt` until the current response finishes.
 
 The CTF system prompt is stored in `system_prompt.txt` and is included in both one-shot and persistent runs. Edit that file to change the model's challenge-solving guidance; the default asks it to verify terminal results and avoid reporting guessed flags as solved.
 
@@ -71,7 +71,7 @@ Conversation history is stored locally in `c.json`. Terminal commands:
 
 Use `/undo` to remove the latest complete user/assistant exchange from saved history and restart the model with the remaining conversation. This is useful when an unwanted response was saved. In one-shot mode, run `py .\run_model.py --undo` to remove the latest exchange without generating a response. The next normal run uses the remaining history.
 
-The model can request terminal commands using `[[run]]...[[/run]]`; Ubuntu in WSL runs by default. It can explicitly request `[[run:gitbash]]...[[/run]]`, `[[run:cmd]]...[[/run]]`, or `[[run:powershell]]...[[/run]]` for those shells. Commands run from the QuietForge project directory (translated to its WSL path for Ubuntu). QuietForge waits for each command to finish, then sends the exit code and output back to the model. Each command has a 120-second timeout, output is limited to 12,000 characters, and each runner invocation allows up to 12 terminal calls.
+The model can request terminal commands using `[[run]]...[[/run]]`; Ubuntu in WSL runs by default. It can explicitly request `[[run:gitbash]]...[[/run]]`, `[[run:cmd]]...[[/run]]`, or `[[run:powershell]]...[[/run]]` for those shells. Commands run from `workspace/` (translated to its WSL path for Ubuntu). The model should inspect files before editing, use one noninteractive command such as Python `-c` or `sed -i`, and reread or diff the result. It should not use interactive editors such as nano or vim. QuietForge waits for each command to finish, then sends the exit code and output back to the model. Each command has a 15-second timeout, output is limited to 12,000 characters, and each runner invocation allows up to 12 terminal calls.
 
 The default idle timeout is 3,600 seconds:
 

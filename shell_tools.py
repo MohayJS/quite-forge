@@ -7,14 +7,16 @@ import shutil
 import subprocess
 
 BASE = Path(__file__).resolve().parent
+WORKSPACE = BASE / "workspace"
+WORKSPACE.mkdir(exist_ok=True)
 GIT_BASH = Path(r"C:\Program Files\Git\bin\bash.exe")
 MAX_TOOL_CALLS = 12
-TOOL_TIMEOUT_SECONDS = 120
+TOOL_TIMEOUT_SECONDS = 15
 MAX_OUTPUT_CHARS = 12000
 
 DEFAULT_SYSTEM_PROMPT = """Solve authorized CTF tasks carefully. Verify transformations and preserve exact bytes and case. Use terminal output as evidence; never invent results or call a guessed flag verified. Stay within the supplied challenge scope.
 
-Use Ubuntu in WSL by default. Request commands only as one complete `[[run]]command[[/run]]` block, then wait for the actual result before choosing the next step. Keep commands short and valid. For Base64 input, pipe it to stdin, e.g. `printf '%s' 'DATA' | base64 -d`; `base64 -d 'DATA'` treats DATA as a filename. If a command fails, use the error output to correct it.
+Terminal commands start inside `workspace`; use `ls` and `cat app.py`, not `ls workspace` or `workspace/app.py`. If the user names a file but gives no contents, inspect it from the workspace before asking; IDE tabs are not directly visible. Use Ubuntu in WSL by default. Request one complete `[[run]]command[[/run]]` block and wait for the actual result. Inspect files before editing. Never use interactive editors such as nano, vim, or an interactive REPL. Edit with one noninteractive command, then reread or diff to verify. For Base64, pipe input to stdin: `printf '%s' 'DATA' | base64 -d`; passing DATA as an argument treats it as a filename. Correct failed commands using actual error output.
 
 Inference stays local in `llama-cli`; never start or expose a server, API, or listener. Keep answers concise, finish sentences and code blocks, and clearly say when evidence is incomplete."""
 SYSTEM_PROMPT_FILE = BASE / "system_prompt.txt"
@@ -29,7 +31,21 @@ def load_system_prompt():
 def clean_truncation_marker(text):
     return text.replace(" ... (truncated)", "").replace("(truncated)", "")
 
-TOOL_INSTRUCTIONS = """When a terminal command is needed, output exactly one complete command block and no surrounding text: [[run]]command[[/run]]. WSL is the default; use [[run:gitbash]]command[[/run]], [[run:cmd]]command[[/run]], or [[run:powershell]]command[[/run]] to select another shell. Wait for the real exit code and output before proceeding. Make at most one command request per response. For Base64, pipe data into stdin: `printf '%s' 'DATA' | base64 -d` (never pass DATA as a filename). For a text challenge, request `nc host port` alone first; the connection stays open for later commands."""
+TOOL_INSTRUCTIONS = """Commands start inside `workspace`; use `ls` and `cat app.py`, not `ls workspace` or `workspace/app.py`. If a named file is not included in the prompt, inspect it there before asking for contents; IDE tabs are not directly visible. When a terminal command is needed, output exactly one complete block and no surrounding text: [[run]]command[[/run]]. WSL is the default; use [[run:gitbash]]command[[/run]], [[run:cmd]]command[[/run]], or [[run:powershell]]command[[/run]] to select another shell. Wait for the real exit code and output before proceeding. Make at most one command request per response. Never run interactive editors or REPLs. Edit with one noninteractive command, then reread or diff to verify. For Base64, pipe data to stdin: `printf '%s' 'DATA' | base64 -d`. For a text challenge, request `nc host port` alone first; the connection stays open for later commands."""
+
+
+def workspace_inventory(limit=80, max_chars=3500):
+    """Return a compact live listing of files available to the model."""
+    files = sorted(
+        path.relative_to(WORKSPACE).as_posix()
+        for path in WORKSPACE.rglob("*")
+        if path.is_file() and path.name != ".gitkeep"
+    )
+    shown = files[:limit]
+    listing = "\n".join(f"- {name}" for name in shown) if shown else "(no files yet)"
+    if len(files) > limit:
+        listing += f"\n- ... and {len(files) - limit} more files"
+    return listing[:max_chars]
 
 TOOL_PATTERN = re.compile(
     r"(?:\[\[run(?::(gitbash|cmd|powershell|wsl))?\]\]|\[run\])\s*(.*?)"
@@ -84,7 +100,7 @@ def find_tool_request(text):
     return None
 
 
-def run_shell(shell, command, cwd=BASE):
+def run_shell(shell, command, cwd=WORKSPACE):
     global _ACTIVE_SOCKET
     nc_match = NC_PATTERN.fullmatch(command.strip())
     if nc_match:

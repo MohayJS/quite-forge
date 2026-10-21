@@ -1,7 +1,7 @@
 from pathlib import Path
 from datetime import datetime, timezone
 import argparse, json, math, os, queue, subprocess, sys, threading, time
-from shell_tools import MAX_TOOL_CALLS, TOOL_INSTRUCTIONS, clean_truncation_marker, find_tool_request, load_system_prompt, run_shell, tool_result
+from shell_tools import MAX_TOOL_CALLS, TOOL_INSTRUCTIONS, clean_truncation_marker, find_tool_request, load_system_prompt, run_shell, tool_result, workspace_inventory
 
 BASE = Path(__file__).resolve().parent
 MODEL = BASE / "models" / "Qwen3-8B-Q4_K_M.gguf"
@@ -50,7 +50,7 @@ def start_model():
                "--simple-io", "--no-show-timings", "--log-disable",
                "--device", "none", "--gpu-layers", "0", "-r", ">"]
     transcript = "\n".join(f"{m['role'].capitalize()}: {m['content']}" for m in history)
-    context_text = load_system_prompt() + "\n\n" + TOOL_INSTRUCTIONS
+    context_text = load_system_prompt() + "\n\n" + TOOL_INSTRUCTIONS + "\n\nWorkspace files at session start:\n" + workspace_inventory()
     if transcript:
         context_text += "\n\nUse the following saved conversation as prior context. Answer the next user message normally.\n\n" + transcript
     CONTEXT.write_text(context_text, encoding="utf-8")
@@ -100,7 +100,7 @@ def send_prompt(user_prompt):
     if process.poll() is not None:
         raise SystemExit("The local model process has already stopped. Restart run_session.cmd.")
     thinking_mode = "/think" if args.thinking else "/no_think"
-    prompt_line = " ".join(user_prompt.splitlines())
+    prompt_line = " ".join((user_prompt + "\nCurrent workspace files:\n" + workspace_inventory()).splitlines())
     process.stdin.write(prompt_line + " " + thinking_mode + "\n")
     process.stdin.flush()
     print("Generating response...", flush=True)

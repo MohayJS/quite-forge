@@ -1,5 +1,7 @@
 # Downloaded model weights
 models/
+workspace/*
+!workspace/.gitkeep
 
 # Local prompts, outputs, conversations, and generated context
 p.txt

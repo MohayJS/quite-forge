@@ -6,7 +6,7 @@ import math
 import os
 import subprocess
 import sys
-from shell_tools import MAX_TOOL_CALLS, TOOL_INSTRUCTIONS, challenge_session_active, clean_truncation_marker, find_tool_request, load_system_prompt, run_shell, tool_result
+from shell_tools import MAX_TOOL_CALLS, TOOL_INSTRUCTIONS, challenge_session_active, clean_truncation_marker, find_tool_request, load_system_prompt, run_shell, tool_result, workspace_inventory
 
 BASE = Path(__file__).resolve().parent
 MODEL = BASE / "models" / "Qwen3-8B-Q4_K_M.gguf"
@@ -65,7 +65,7 @@ if not user_prompt:
     raise SystemExit("p.txt is empty.")
 
 system_prompt = load_system_prompt()
-turns = f"<|im_start|>system\n{system_prompt}\n\n{TOOL_INSTRUCTIONS}<|im_end|>\n"
+turns = f"<|im_start|>system\n{system_prompt}\n\n{TOOL_INSTRUCTIONS}\n\nCurrent workspace files:\n{workspace_inventory()}<|im_end|>\n"
 for message in history:
     turns += f"<|im_start|>{message['role']}\n{message['content']}<|im_end|>\n"
 thinking_mode = "/think" if args.thinking else "/no_think"
