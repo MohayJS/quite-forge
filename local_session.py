@@ -116,7 +116,7 @@ commands = queue.Queue()
 
 def read_commands():
     while True:
-        try: commands.put(input("\n[Type /exit, /clear, /save name, or /load name] ").strip())
+        try: commands.put(input("\n[Type /undo, /clear, /save name, /load name, or /exit] ").strip())
         except EOFError: commands.put("/exit"); return
 
 def generate(user_prompt):
@@ -138,6 +138,12 @@ try:
             if command == "/clear":
                 if busy.is_set(): print("Wait for the current response before using /clear."); continue
                 history.clear(); save_history(); start_model(); print("History cleared and model context restarted."); continue
+            if command == "/undo":
+                if busy.is_set(): print("Wait for the current response before using /undo."); continue
+                if len(history) >= 2 and history[-2].get("role") == "user" and history[-1].get("role") == "assistant":
+                    del history[-2:]; save_history(); start_model(); print("Latest exchange removed and model context restarted.")
+                else: print("No complete latest user/assistant exchange to remove.")
+                continue
             if command.startswith("/save "):
                 name = command[6:].strip()
                 if not name: print("Usage: /save <name>"); continue

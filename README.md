@@ -40,11 +40,14 @@ Write your prompt into `p.txt` and save the file. QuietForge detects it automati
 Conversation history is stored locally in `c.json`. Terminal commands:
 
 ```text
+/undo
 /clear
 /save name
 /load name
 /exit
 ```
+
+Use `/undo` to remove the latest complete user/assistant exchange from saved history and restart the model with the remaining conversation. This is useful when an unwanted response was saved. In one-shot mode, run `py .\run_model.py --undo` to remove the latest exchange without generating a response. The next normal run uses the remaining history.
 
 The default idle timeout is 3,600 seconds:
 
@@ -66,7 +69,7 @@ The same arguments work with one-shot mode:
 py .\run_model.py C:\Users\mohay C:\ C:\Users\mohay\OneDrive\Desktop
 ```
 
-Use `--reset` with `run_model.py` to ignore saved history for one run.
+Use `--reset` with `run_model.py` to ignore saved history for one run. Use `--undo` to remove the latest exchange from the history file and exit.
 
 ## Privacy
 

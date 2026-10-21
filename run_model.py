@@ -12,6 +12,7 @@ WORK_PROMPT = BASE / ".prompt_for_model.txt"
 
 parser = argparse.ArgumentParser(description="Run Phi-4-mini locally with conversation history.")
 parser.add_argument("--reset", action="store_true", help="clear history before running")
+parser.add_argument("--undo", action="store_true", help="remove the latest user/assistant exchange from history")
 parser.add_argument("--history", type=Path, default=DEFAULT_HISTORY, help="use another history JSON file")
 parser.add_argument("locations", nargs="*", metavar="PROMPT_DIR RESPONSE_DIR HISTORY_DIR")
 args = parser.parse_args()
@@ -38,6 +39,15 @@ else:
         history = json.loads(history_file.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         raise SystemExit(f"Invalid history file: {history_file}")
+
+if args.undo:
+    if len(history) >= 2 and history[-2].get("role") == "user" and history[-1].get("role") == "assistant":
+        del history[-2:]
+        history_file.write_text(json.dumps(history, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        print(f"Latest exchange removed from: {history_file}")
+    else:
+        print("No complete latest user/assistant exchange to remove.")
+    raise SystemExit(0)
 
 user_prompt = prompt_file.read_text(encoding="utf-8").strip()
 if not user_prompt:
