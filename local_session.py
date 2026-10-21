@@ -1,7 +1,7 @@
 from pathlib import Path
 from datetime import datetime, timezone
 import argparse, json, math, os, queue, subprocess, sys, threading, time
-from shell_tools import MAX_TOOL_CALLS, TOOL_INSTRUCTIONS, clean_truncation_marker, find_tool_request, load_system_prompt, run_shell, tool_result, workspace_inventory
+from shell_tools import MAX_TOOL_CALLS, TOOL_INSTRUCTIONS, clean_truncation_marker, compact_history, find_tool_request, load_system_prompt, run_shell, tool_result, workspace_inventory
 
 BASE = Path(__file__).resolve().parent
 MODEL = BASE / "models" / "Qwen3-8B-Q4_K_M.gguf"
@@ -49,7 +49,7 @@ def start_model():
                "--reasoning", "on" if args.thinking else "off",
                "--simple-io", "--no-show-timings", "--log-disable",
                "--device", "none", "--gpu-layers", "0", "-r", ">"]
-    transcript = "\n".join(f"{m['role'].capitalize()}: {m['content']}" for m in history)
+    transcript = "\n".join(f"{m['role'].capitalize()}: {m['content']}" for m in compact_history(history))
     context_text = load_system_prompt() + "\n\n" + TOOL_INSTRUCTIONS + "\n\nWorkspace files at session start:\n" + workspace_inventory()
     if transcript:
         context_text += "\n\nUse the following saved conversation as prior context. Answer the next user message normally.\n\n" + transcript
@@ -96,6 +96,37 @@ def read_response():
 def save_history():
     HISTORY.write_text(json.dumps(history, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
+def clear_chat_context():
+    """Clear llama-cli's accumulated turns without reloading its model weights."""
+    if process.poll() is not None:
+        raise SystemExit("The local model process stopped while clearing its context.")
+    process.stdin.write("/clear\n")
+    process.stdin.flush()
+    response = read_response()
+    while "/exit or Ctrl+C" in response or "/clear              clear the chat history" in response:
+        response = read_response()
+
+def context_excerpt(text, limit):
+    if len(text) <= limit:
+        return text
+    head = int(limit * 0.65)
+    return text[:head] + " [middle omitted] " + text[-(limit - head):]
+
+def rebuild_task_context(user_prompt, steps, followup):
+    lines = ["Continue the user's current task. Do not repeat completed commands.",
+             "Task: " + context_excerpt(user_prompt, 1600),
+             "Completed terminal steps and their real results:"]
+    for index, (shell, command, code, output) in enumerate(steps):
+        is_recent = index >= len(steps) - 2
+        output_limit = 650 if is_recent else 120
+        lines.append(
+            f"{index + 1}. [{shell}] {command} (exit {code}): "
+            f"{context_excerpt(output, output_limit)}"
+        )
+    lines.append(followup)
+    lines.append("Choose one next step from these results, or give the concise final answer.")
+    return " ".join(lines)
+
 def send_prompt(user_prompt):
     if process.poll() is not None:
         raise SystemExit("The local model process has already stopped. Restart run_session.cmd.")
@@ -110,6 +141,7 @@ def send_prompt(user_prompt):
     while "/exit or Ctrl+C" in answer or "/clear              clear the chat history" in answer:
         answer = read_response()
     tool_trace = []
+    tool_steps = []
     for tool_count in range(MAX_TOOL_CALLS + 1):
         request = find_tool_request(answer)
         if not request:
@@ -125,11 +157,15 @@ def send_prompt(user_prompt):
             exit_code, output = run_shell(shell, shell_command)
         result_text = tool_result(shell, shell_command, exit_code, output)
         tool_trace.append(result_text)
+        tool_steps.append((shell, shell_command, exit_code, output))
         if exit_code != 0:
             followup = "The command failed. Treat its output as an error, not as the intended result. Do not guess or claim the operation succeeded. If the task still depends on it, correct the command and request another terminal call; otherwise explain the failure."
         else:
             followup = "Continue using the result above. Request another command with the tool format if needed; otherwise give the final answer."
-        followup_line = " ".join((result_text + " " + followup).splitlines())
+        # Keep full tool output in the saved trace, but reset the CLI's growing
+        # conversation and provide a compact task log for the next model turn.
+        clear_chat_context()
+        followup_line = rebuild_task_context(user_prompt, tool_steps, followup)
         process.stdin.write(followup_line + " " + thinking_mode + "\n")
         process.stdin.flush()
         answer = read_response()

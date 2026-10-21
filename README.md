@@ -44,7 +44,7 @@ py .\run_model.py --thinking
 
 This option applies to the whole run/session. For one-shot mode it can be combined with `--reset` or other runner options.
 
-Each model response can generate up to 2,048 tokens. This is a ceiling, not a target; generation stops sooner when the model finishes. The context window is 4,096 tokens total, shared by the prompt, conversation, and generated response. During one runner invocation, the agent can make up to 12 terminal calls, one per model turn. The CTF prompt reminds it to pipe Base64 input to `base64 -d` (for example, `printf '%s' 'DATA' | base64 -d`) instead of passing the data as a filename.
+Each model response can generate up to 2,048 tokens. This is a ceiling, not a target; generation stops sooner when the model finishes. The context window is 4,096 tokens total, shared by the prompt, conversation, and generated response. The one-shot runner sends only the latest two compact tool results back to the model and trims older saved messages. The persistent session clears llama-cli's in-memory chat after each terminal command and gives it a compact task log, preventing repeated output from filling its context. Full command output remains in `c.json`. During one runner invocation, the agent can make up to 12 terminal calls, one per model turn. The CTF prompt reminds it to pipe Base64 input to `base64 -d` (for example, `printf '%s' 'DATA' | base64 -d`) instead of passing the data as a filename.
 
 Both runners use about 80% of the machine's logical processors by default (`7` threads on an 8-thread CPU). Adjust the thread count with `--threads N`, for example:
 
