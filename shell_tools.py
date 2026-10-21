@@ -12,10 +12,11 @@ MAX_TOOL_CALLS = 12
 TOOL_TIMEOUT_SECONDS = 120
 MAX_OUTPUT_CHARS = 12000
 
-DEFAULT_SYSTEM_PROMPT = """You are a careful assistant helping solve authorized CTF challenges.
-Analyze the supplied challenge clues and data one step at a time. Use terminal commands to verify transformations and hypotheses when useful. Keep exact output, capitalization, punctuation, and bytes in mind.
-For terminal work, Git Bash is the default. Use WSL when the user requests it or when its Linux utilities are needed. Request commands with the provided terminal format, then wait for and inspect the real exit code and output before choosing the next step.
-Never invent command output, claim a command ran without its result, or present a guessed flag as verified. Report a flag as solved only when actual challenge data or a server confirmation supports it. Stay within the challenge host and scope the user provided. If evidence is incomplete, say so and suggest the next verifiable step."""
+DEFAULT_SYSTEM_PROMPT = """Solve authorized CTF tasks carefully. Verify transformations and preserve exact bytes and case. Use terminal output as evidence; never invent results or call a guessed flag verified. Stay within the supplied challenge scope.
+
+Use Ubuntu in WSL by default. Request commands only as one complete `[[run]]command[[/run]]` block, then wait for the actual result before choosing the next step. Keep commands short and valid. For Base64 input, pipe it to stdin, e.g. `printf '%s' 'DATA' | base64 -d`; `base64 -d 'DATA'` treats DATA as a filename. If a command fails, use the error output to correct it.
+
+Inference stays local in `llama-cli`; never start or expose a server, API, or listener. Keep answers concise, finish sentences and code blocks, and clearly say when evidence is incomplete."""
 SYSTEM_PROMPT_FILE = BASE / "system_prompt.txt"
 
 
@@ -28,9 +29,7 @@ def load_system_prompt():
 def clean_truncation_marker(text):
     return text.replace(" ... (truncated)", "").replace("(truncated)", "")
 
-TOOL_INSTRUCTIONS = """You can run terminal commands when needed. To request one, output exactly one block in this form, with no other text around it:
-[[run]]command for Git Bash[[/run]]
-Git Bash is the default. To use Ubuntu in WSL, request [[run:wsl]]command[[/run]]. You can also choose [[run:cmd]]command[[/run]] or [[run:powershell]]command[[/run]]. The command runs to completion; you will receive its exit code and output, then continue with a normal answer. Do not claim a command ran unless you receive its result. For a text challenge, request `nc host port` by itself first; the terminal tool keeps that TCP session open across later tool calls so you can submit one Linux command per step. Make at most one request per response."""
+TOOL_INSTRUCTIONS = """When a terminal command is needed, output exactly one complete command block and no surrounding text: [[run]]command[[/run]]. WSL is the default; use [[run:gitbash]]command[[/run]], [[run:cmd]]command[[/run]], or [[run:powershell]]command[[/run]] to select another shell. Wait for the real exit code and output before proceeding. Make at most one command request per response. For Base64, pipe data into stdin: `printf '%s' 'DATA' | base64 -d` (never pass DATA as a filename). For a text challenge, request `nc host port` alone first; the connection stays open for later commands."""
 
 TOOL_PATTERN = re.compile(
     r"(?:\[\[run(?::(gitbash|cmd|powershell|wsl))?\]\]|\[run\])\s*(.*?)"
@@ -64,21 +63,21 @@ def _read_challenge_response(sock):
 def find_tool_request(text):
     match = TOOL_PATTERN.search(text)
     if match:
-        return (match.group(1) or "gitbash").lower(), match.group(2).strip()
+        return (match.group(1) or "wsl").lower(), match.group(2).strip()
     # Phi sometimes returns a terminal command as a fenced example instead of
     # using the requested marker. Accept it only for nc setup or an active nc
     # session, where the command's intent is unambiguous.
     match = re.search(r"```(?:bash|sh)?\s*\n?([^`\r\n]+)\n?```", text, re.I)
     if match:
         command = match.group(1).strip()
-        return "gitbash", command
+        return "wsl", command
     match = re.search(r"```(?:run|terminal)\s+([^`\r\n]+)```", text, re.I)
     if match:
-        return "gitbash", match.group(1).strip()
+        return "wsl", match.group(1).strip()
     # Some local model responses imitate the tool transcript in plain text.
     # Treat the listed command as a request so it is actually run and its real
     # output replaces the model's fabricated trace in the following turn.
-    trace_matches = list(re.finditer(r"\[Terminal tool:\s*(gitbash|cmd|powershell)\]\s*\n\$\s*([^\r\n]+)", text, re.I))
+    trace_matches = list(re.finditer(r"\[Terminal tool:\s*(gitbash|cmd|powershell|wsl)\]\s*\n\$\s*([^\r\n]+)", text, re.I))
     if trace_matches:
         trace = trace_matches[-1]
         return trace.group(1).lower(), trace.group(2).strip()
@@ -123,9 +122,12 @@ def run_shell(shell, command, cwd=BASE):
         if not executable or not executable.exists():
             return 127, "Git Bash was not found. Install Git for Windows or check its installation path."
         command = re.sub(r"\bbase64-decode\b", "base64 -d", command, flags=re.I)
-        decode_arg = re.fullmatch(r"base64\s+(?:-d|--decode)\s+([A-Za-z0-9+/=]+)", command.strip(), re.I)
+        decode_arg = re.fullmatch(
+            r"base64\s+(?:-d|--decode)\s+(?:'([A-Za-z0-9+/=]+)'|\"([A-Za-z0-9+/=]+)\"|([A-Za-z0-9+/=]+))",
+            command.strip(), re.I,
+        )
         if decode_arg:
-            encoded = decode_arg.group(1)
+            encoded = next(group for group in decode_arg.groups() if group is not None)
             command = f"printf '%s' '{encoded}' | base64 -d"
         rev_inline = re.fullmatch(r"rev([^\s].*)", command.strip(), re.I)
         if rev_inline:

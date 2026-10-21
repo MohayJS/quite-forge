@@ -1,17 +1,21 @@
 from pathlib import Path
 from datetime import datetime, timezone
-import argparse, json, queue, subprocess, sys, threading, time
+import argparse, json, math, os, queue, subprocess, sys, threading, time
 from shell_tools import MAX_TOOL_CALLS, TOOL_INSTRUCTIONS, clean_truncation_marker, find_tool_request, load_system_prompt, run_shell, tool_result
 
 BASE = Path(__file__).resolve().parent
-MODEL = BASE / "models" / "Phi-4-mini-instruct-q4_k_m.gguf"
+MODEL = BASE / "models" / "Qwen3-8B-Q4_K_M.gguf"
 PROMPT = BASE / "p.txt"
 OUTPUT = BASE / "r.txt"
 HISTORY = BASE / "c.json"
 parser = argparse.ArgumentParser()
 parser.add_argument("--timeout", type=int, default=3600)
+parser.add_argument("--thinking", action="store_true", help="enable Qwen3 thinking for this session")
+parser.add_argument("--threads", type=int, default=max(1, math.ceil((os.cpu_count() or 1) * 0.8)), help="CPU threads to use (default: about 80%% of logical processors)")
 parser.add_argument("locations", nargs="*", metavar="PROMPT_DIR RESPONSE_DIR HISTORY_DIR")
 args = parser.parse_args()
+if args.threads < 1:
+    parser.error("--threads must be at least 1")
 if len(args.locations) > 3:
     raise SystemExit("Provide at most: PROMPT_DIR RESPONSE_DIR HISTORY_DIR")
 locations = (args.locations + ["-", "-", "-"])[:3]
@@ -40,7 +44,9 @@ def start_model():
     global process, output_queue
     if process and process.poll() is None: process.terminate()
     output_queue = queue.Queue()
-    command = ["llama-cli", "-m", str(MODEL), "-n", "512", "-c", "4096",
+    command = ["llama-cli", "-m", str(MODEL), "-n", "2048", "-c", "4096",
+               "--threads", str(args.threads),
+               "--reasoning", "on" if args.thinking else "off",
                "--simple-io", "--no-show-timings", "--log-disable",
                "--device", "none", "--gpu-layers", "0", "-r", ">"]
     transcript = "\n".join(f"{m['role'].capitalize()}: {m['content']}" for m in history)
@@ -93,7 +99,9 @@ def save_history():
 def send_prompt(user_prompt):
     if process.poll() is not None:
         raise SystemExit("The local model process has already stopped. Restart run_session.cmd.")
-    process.stdin.write(user_prompt + "\n")
+    thinking_mode = "/think" if args.thinking else "/no_think"
+    prompt_line = " ".join(user_prompt.splitlines())
+    process.stdin.write(prompt_line + " " + thinking_mode + "\n")
     process.stdin.flush()
     print("Generating response...", flush=True)
     answer = read_response()
@@ -107,7 +115,7 @@ def send_prompt(user_prompt):
         if not request:
             break
         if tool_count == MAX_TOOL_CALLS:
-            answer = "I reached the limit of five terminal commands for this response."
+            answer = "I reached the limit of twelve terminal commands for this response."
             break
         shell, shell_command = request
         if not shell_command:
@@ -117,7 +125,12 @@ def send_prompt(user_prompt):
             exit_code, output = run_shell(shell, shell_command)
         result_text = tool_result(shell, shell_command, exit_code, output)
         tool_trace.append(result_text)
-        process.stdin.write(result_text + "\nContinue using the result above. Request another command with the tool format if needed; otherwise give the final answer.\n")
+        if exit_code != 0:
+            followup = "The command failed. Treat its output as an error, not as the intended result. Do not guess or claim the operation succeeded. If the task still depends on it, correct the command and request another terminal call; otherwise explain the failure."
+        else:
+            followup = "Continue using the result above. Request another command with the tool format if needed; otherwise give the final answer."
+        followup_line = " ".join((result_text + " " + followup).splitlines())
+        process.stdin.write(followup_line + " " + thinking_mode + "\n")
         process.stdin.flush()
         answer = read_response()
         while "/exit or Ctrl+C" in answer or "/clear              clear the chat history" in answer:
