@@ -11,6 +11,7 @@ HISTORY = BASE / "c.json"
 parser = argparse.ArgumentParser()
 parser.add_argument("--timeout", type=int, default=3600)
 parser.add_argument("--thinking", action="store_true", help="enable Qwen3 thinking for this session")
+parser.add_argument("--no-tools", action="store_true", help="disable terminal tools for this session")
 parser.add_argument("--threads", type=int, default=max(1, math.ceil((os.cpu_count() or 1) * 0.8)), help="CPU threads to use (default: about 80%% of logical processors)")
 parser.add_argument("locations", nargs="*", metavar="PROMPT_DIR RESPONSE_DIR HISTORY_DIR")
 args = parser.parse_args()
@@ -50,7 +51,10 @@ def start_model():
                "--simple-io", "--no-show-timings", "--log-disable",
                "--device", "none", "--gpu-layers", "0", "-r", ">"]
     transcript = "\n".join(f"{m['role'].capitalize()}: {m['content']}" for m in compact_history(history))
-    context_text = load_system_prompt() + "\n\n" + TOOL_INSTRUCTIONS + "\n\nWorkspace files at session start:\n" + workspace_inventory()
+    if args.no_tools:
+        context_text = load_system_prompt() + "\n\nTerminal tools are disabled for this session. Answer the user's questions directly using only the supplied prompt and conversation; do not request or pretend to run terminal commands. If information is unavailable, say so."
+    else:
+        context_text = load_system_prompt() + "\n\n" + TOOL_INSTRUCTIONS + "\n\nWorkspace files at session start:\n" + workspace_inventory()
     if transcript:
         context_text += "\n\nUse the following saved conversation as prior context. Answer the next user message normally.\n\n" + transcript
     CONTEXT.write_text(context_text, encoding="utf-8")
@@ -131,7 +135,7 @@ def send_prompt(user_prompt):
     if process.poll() is not None:
         raise SystemExit("The local model process has already stopped. Restart run_session.cmd.")
     thinking_mode = "/think" if args.thinking else "/no_think"
-    prompt_line = " ".join((user_prompt + "\nCurrent workspace files:\n" + workspace_inventory()).splitlines())
+    prompt_line = " ".join((user_prompt + ("" if args.no_tools else "\nCurrent workspace files:\n" + workspace_inventory())).splitlines())
     process.stdin.write(prompt_line + " " + thinking_mode + "\n")
     process.stdin.flush()
     print("Generating response...", flush=True)
@@ -142,7 +146,7 @@ def send_prompt(user_prompt):
         answer = read_response()
     tool_trace = []
     tool_steps = []
-    for tool_count in range(MAX_TOOL_CALLS + 1):
+    for tool_count in range(0 if args.no_tools else MAX_TOOL_CALLS + 1):
         request = find_tool_request(answer)
         if not request:
             break
